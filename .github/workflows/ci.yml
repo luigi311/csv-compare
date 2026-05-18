@@ -1,0 +1,76 @@
+name: CI
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths-ignore:
+      - .gitignore
+      - "*.md"
+  push:
+    paths-ignore:
+      - .gitignore
+      - "*.md"
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            arch: amd64
+            type: linux
+          - os: windows-latest
+            arch: amd64
+            type: windows
+          - os: ubuntu-24.04-arm
+            arch: aarch64
+            type: linux
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions-rust-lang/setup-rust-toolchain@02be93da58aa71fb456aa9c43b301149248829d8
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0
+        with:
+          key: "${{ matrix.type }}-${{ matrix.arch }}"
+
+      - name: Build
+        shell: bash
+        run: cargo build --release
+
+      - name: Move files (linux/macOS)
+        if: ${{ matrix.type == 'linux' ||  matrix.type == 'macos' }}
+        run: |
+          mkdir -p builds
+          mv target/*/csv-compare ${{ github.workspace }}/builds/csv-compare-${{ matrix.type }}-${{ matrix.arch }}
+
+      - name: Move files (windows)
+        if: ${{ matrix.type == 'windows' }}
+        run: |
+          mkdir -p builds
+          mv target/*/csv-compare.exe ${{ github.workspace }}/builds/csv-compare-${{ matrix.type }}-${{ matrix.arch }}.exe
+
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: csv-compare-${{ matrix.type }}-${{ matrix.arch }}
+          path: ${{ github.workspace }}/builds/*
+
+      - name: Upload binaries to GitHub Releases
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: svenstaro/upload-release-action@81c65b7cd4de9b2570615ce3aad67a41de5b1a13
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: ${{ github.workspace }}/builds/*
+          tag: ${{ github.ref }}
+          file_glob: true
+          overwrite: true
